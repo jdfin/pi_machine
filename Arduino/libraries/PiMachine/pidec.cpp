@@ -7,11 +7,13 @@
 int64_t _m;
 double _invm;
 
+
 void InitializeModulo(int64_t m)
 {
   _m = m;
   _invm = 1. / (double)m;
 }
+
 
 // Compute a*b modulo _m
 inline int64_t MulMod(int64_t a, int64_t b)
@@ -23,6 +25,7 @@ inline int64_t MulMod(int64_t a, int64_t b)
   return a * b - q * _m;
 }
 
+
 // Compute a*b+c*d modulo _m
 inline int64_t SumMulMod(int64_t a, int64_t b, int64_t c, int64_t d)
 {
@@ -30,16 +33,18 @@ inline int64_t SumMulMod(int64_t a, int64_t b, int64_t c, int64_t d)
   return a * b + c * d - q * _m;
 }
 
+
 double MyTime() { return ((double)clock()) / CLOCKS_PER_SEC; }
 
-double FullDouble = 1024. * 1024. * 1024. * 1024. * 1024. * 8.; // 2^53
 
 inline double easyround(double x)
 {
+  const double FullDouble = 1024. * 1024. * 1024. * 1024. * 1024. * 8.; // 2^53
   double y = x + FullDouble;
   y -= FullDouble;
   return y;
 }
+
 
 /* return g, A such that g=gcd(a,_m) and a*A=g mod _m  */
 int64_t ExtendedGcd(int64_t a, int64_t& A)
@@ -62,17 +67,17 @@ int64_t ExtendedGcd(int64_t a, int64_t& A)
   return r0;
 }
 
+
 int64_t InvMod(int64_t a)
 {
   int64_t A;
   a = a % _m;
   if (a < 0)
     a += _m;
-  int64_t gcd = ExtendedGcd(a, A);
-  if (gcd != 1)
-    printf("pb, gcd should be 1\n");
+  (void)ExtendedGcd(a, A);
   return A;
 }
+
 
 int64_t PowMod(int64_t a, long b)
 {
@@ -90,6 +95,7 @@ int64_t PowMod(int64_t a, long b)
   }
   return r;
 }
+
 
 /* Compute sum_{j=0}^k binomial(n,j) mod m */
 int64_t SumBinomialMod(long n, long k)
@@ -109,8 +115,7 @@ int64_t SumBinomialMod(long n, long k)
   //
   // Compute prime factors of _m which are smaller than k
   //
-  const long NbMaxFactors
-      = 20; // no more than 20 different prime factors for numbers <2^64
+  const long NbMaxFactors = 20; // no more than 20 different prime factors for numbers <2^64
   long PrimeFactor[NbMaxFactors];
   long NbPrimeFactors = 0;
   int64_t mm = _m;
@@ -177,7 +182,7 @@ int64_t SumBinomialMod(long n, long k)
 
     if (BinomialSecondaryUpdate) {
       BinomialSecondary = BinomialPower[0];
-      for (i = 1; i < NbPrimeFactors; i++)
+      for (long i = 1; i < NbPrimeFactors; i++)
         BinomialSecondary = MulMod(BinomialSecondary, BinomialPower[i]);
     }
 
@@ -194,6 +199,7 @@ int64_t SumBinomialMod(long n, long k)
   return SumNum;
 }
 
+
 /* return fractionnal part of 10^n*(a/b) */
 double DigitsOfFraction(long n, int64_t a, int64_t b)
 {
@@ -202,6 +208,7 @@ double DigitsOfFraction(long n, int64_t a, int64_t b)
   int64_t c = MulMod(pow, a);
   return (double)c / (double)b;
 }
+
 
 /* return fractionnal part of 10^n*S, where S=4*sum_{k=0}^{m-1} (-1)^k/(2*k+1).
  * m is even */
@@ -214,6 +221,7 @@ double DigitsOfSeries(long n, int64_t m)
   }
   return x;
 }
+
 
 double DigitsOfPi(long n)
 {
@@ -238,6 +246,7 @@ double DigitsOfPi(long n)
   }
   return x;
 }
+
 
 int main()
 {
