@@ -4,32 +4,29 @@
 
 #include <time.h>
 
-// ModInt should be a 64-bit long integer. It could be a double floating point
-// type, provided adaptations of MulMod and SumMulMod functions are done
-typedef __int64 ModInt;
-ModInt _m;
+int64_t _m;
 double _invm;
 
-void InitializeModulo(ModInt m)
+void InitializeModulo(int64_t m)
 {
   _m = m;
   _invm = 1. / (double)m;
 }
 
 // Compute a*b modulo _m
-inline ModInt MulMod(ModInt a, ModInt b)
+inline int64_t MulMod(int64_t a, int64_t b)
 {
   // classical trick to bypass the 64-bit limitation, when a*b does not fit into
-  // the ModInt type. Works whenever a*b/_m is less than 2^52 (double type
+  // the int64_t type. Works whenever a*b/_m is less than 2^52 (double type
   // maximal precision)
-  ModInt q = (ModInt)(_invm * (double)a * (double)b);
+  int64_t q = (int64_t)(_invm * (double)a * (double)b);
   return a * b - q * _m;
 }
 
 // Compute a*b+c*d modulo _m
-inline ModInt SumMulMod(ModInt a, ModInt b, ModInt c, ModInt d)
+inline int64_t SumMulMod(int64_t a, int64_t b, int64_t c, int64_t d)
 {
-  ModInt q = (ModInt)(_invm * ((double)a * (double)b + (double)c * (double)d));
+  int64_t q = (int64_t)(_invm * ((double)a * (double)b + (double)c * (double)d));
   return a * b + c * d - q * _m;
 }
 
@@ -45,15 +42,15 @@ inline double easyround(double x)
 }
 
 /* return g, A such that g=gcd(a,_m) and a*A=g mod _m  */
-ModInt ExtendedGcd(ModInt a, ModInt& A)
+int64_t ExtendedGcd(int64_t a, int64_t& A)
 {
-  ModInt A0 = 1, A1 = 0;
-  ModInt r0 = a, r1 = _m;
+  int64_t A0 = 1, A1 = 0;
+  int64_t r0 = a, r1 = _m;
 
   while (r1 > 0.) {
-    ModInt q = r0 / r1;
+    int64_t q = r0 / r1;
 
-    ModInt tmp = A0 - q * A1;
+    int64_t tmp = A0 - q * A1;
     A0 = A1;
     A1 = tmp;
 
@@ -65,21 +62,21 @@ ModInt ExtendedGcd(ModInt a, ModInt& A)
   return r0;
 }
 
-ModInt InvMod(ModInt a)
+int64_t InvMod(int64_t a)
 {
-  ModInt A;
+  int64_t A;
   a = a % _m;
   if (a < 0)
     a += _m;
-  ModInt gcd = ExtendedGcd(a, A);
+  int64_t gcd = ExtendedGcd(a, A);
   if (gcd != 1)
     printf("pb, gcd should be 1\n");
   return A;
 }
 
-ModInt PowMod(ModInt a, long b)
+int64_t PowMod(int64_t a, long b)
 {
-  ModInt r, aa;
+  int64_t r, aa;
 
   r = 1;
   aa = a;
@@ -95,7 +92,7 @@ ModInt PowMod(ModInt a, long b)
 }
 
 /* Compute sum_{j=0}^k binomial(n,j) mod m */
-ModInt SumBinomialMod(long n, long k)
+int64_t SumBinomialMod(long n, long k)
 {
   // Optimisation : when k>n/2 we use the relation
   // sum_{j=0}^k binomial(n,j) =  2^n - sum_{j=0}^{n-k-1} binomial(n,j)
@@ -104,7 +101,7 @@ ModInt SumBinomialMod(long n, long k)
   // near n/2 using the identity sum_{j=0}^{n/2} = 2^(n-1) + 1/2
   // binomial(n,n/2). A global saving of 20% or 25% could be obtained.
   if (k > n / 2) {
-    ModInt s = PowMod(2, n) - SumBinomialMod(n, n - k - 1);
+    int64_t s = PowMod(2, n) - SumBinomialMod(n, n - k - 1);
     if (s < 0)
       s += _m;
     return s;
@@ -116,9 +113,9 @@ ModInt SumBinomialMod(long n, long k)
       = 20; // no more than 20 different prime factors for numbers <2^64
   long PrimeFactor[NbMaxFactors];
   long NbPrimeFactors = 0;
-  ModInt mm = _m;
+  int64_t mm = _m;
   // _m is odd, thus has only odd prime factors
-  for (ModInt p = 3; p * p <= mm; p += 2) {
+  for (int64_t p = 3; p * p <= mm; p += 2) {
     if (mm % p == 0) {
       mm = mm / p;
       if (p <= k) // only prime factors <=k are needed
@@ -142,14 +139,14 @@ ModInt SumBinomialMod(long n, long k)
     NextNum[i] = PrimeFactor[i] * (n / PrimeFactor[i]);
   }
 
-  ModInt BinomialNum0 = 1, BinomialDenom = 1;
-  ModInt SumNum = 1;
-  ModInt BinomialSecondary = 1;
+  int64_t BinomialNum0 = 1, BinomialDenom = 1;
+  int64_t SumNum = 1;
+  int64_t BinomialSecondary = 1;
 
   for (long j = 1; j <= k; j++) {
     // new binomial : b(n,j) = b(n,j-1) * (n-j+1) / j
-    ModInt num = n - j + 1;
-    ModInt denom = j;
+    int64_t num = n - j + 1;
+    int64_t denom = j;
     int BinomialSecondaryUpdate = 0;
 
     for (long i = 0; i < NbPrimeFactors; i++) {
@@ -198,20 +195,20 @@ ModInt SumBinomialMod(long n, long k)
 }
 
 /* return fractionnal part of 10^n*(a/b) */
-double DigitsOfFraction(long n, ModInt a, ModInt b)
+double DigitsOfFraction(long n, int64_t a, int64_t b)
 {
   InitializeModulo(b);
-  ModInt pow = PowMod(10, n);
-  ModInt c = MulMod(pow, a);
+  int64_t pow = PowMod(10, n);
+  int64_t c = MulMod(pow, a);
   return (double)c / (double)b;
 }
 
 /* return fractionnal part of 10^n*S, where S=4*sum_{k=0}^{m-1} (-1)^k/(2*k+1).
  * m is even */
-double DigitsOfSeries(long n, ModInt m)
+double DigitsOfSeries(long n, int64_t m)
 {
   double x = 0.;
-  for (ModInt k = 0; k < m; k += 2) {
+  for (int64_t k = 0; k < m; k += 2) {
     x += DigitsOfFraction(n, 4, 2 * k + 1) - DigitsOfFraction(n, 4, 2 * k + 3);
     x = x - easyround(x);
   }
@@ -224,15 +221,15 @@ double DigitsOfPi(long n)
   long M = 2 * (long)(3. * n / logn / logn / logn); // M is even
   long N = 1 + (long)((n + 15.) * log(10.) / (1. + log(2. * M))); // n >= N
   N += N % 2; // N should be even
-  ModInt mmax = (ModInt)M * (ModInt)N + (ModInt)N;
+  int64_t mmax = (int64_t)M * (int64_t)N + (int64_t)N;
   printf("Parameters : M=%ld, N=%ld, M*N+M=%.0lf\n", M, N, (double)mmax);
   double st = MyTime();
   double x = DigitsOfSeries(n, mmax);
   printf("Series time : %.2lf\n", MyTime() - st);
   for (long k = 0.; k < N; k++) {
-    ModInt m = (ModInt)2 * (ModInt)M * (ModInt)N + (ModInt)2 * (ModInt)k + 1;
+    int64_t m = (int64_t)2 * (int64_t)M * (int64_t)N + (int64_t)2 * (int64_t)k + 1;
     InitializeModulo(m);
-    ModInt s = SumBinomialMod(N, k);
+    int64_t s = SumBinomialMod(N, k);
     s = MulMod(s, PowMod(5, N));
     s = MulMod(s, PowMod(10, n - N)); // n-N is always positive
     s = MulMod(s, 4);
