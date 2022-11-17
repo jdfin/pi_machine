@@ -1,14 +1,12 @@
+#include <Arduino.h>
 #include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <pidec.h>
 
-#include <time.h>
-
-int64_t _m;
-double _invm;
+static int64_t _m;
+static double _invm;
 
 
-void InitializeModulo(int64_t m)
+static void InitializeModulo(int64_t m)
 {
   _m = m;
   _invm = 1. / (double)m;
@@ -34,9 +32,6 @@ inline int64_t SumMulMod(int64_t a, int64_t b, int64_t c, int64_t d)
 }
 
 
-double MyTime() { return ((double)clock()) / CLOCKS_PER_SEC; }
-
-
 inline double easyround(double x)
 {
   const double FullDouble = 1024. * 1024. * 1024. * 1024. * 1024. * 8.; // 2^53
@@ -47,7 +42,7 @@ inline double easyround(double x)
 
 
 /* return g, A such that g=gcd(a,_m) and a*A=g mod _m  */
-int64_t ExtendedGcd(int64_t a, int64_t& A)
+static int64_t ExtendedGcd(int64_t a, int64_t& A)
 {
   int64_t A0 = 1, A1 = 0;
   int64_t r0 = a, r1 = _m;
@@ -68,7 +63,7 @@ int64_t ExtendedGcd(int64_t a, int64_t& A)
 }
 
 
-int64_t InvMod(int64_t a)
+static int64_t InvMod(int64_t a)
 {
   int64_t A;
   a = a % _m;
@@ -79,7 +74,7 @@ int64_t InvMod(int64_t a)
 }
 
 
-int64_t PowMod(int64_t a, long b)
+static int64_t PowMod(int64_t a, long b)
 {
   int64_t r, aa;
 
@@ -98,7 +93,7 @@ int64_t PowMod(int64_t a, long b)
 
 
 /* Compute sum_{j=0}^k binomial(n,j) mod m */
-int64_t SumBinomialMod(long n, long k)
+static int64_t SumBinomialMod(long n, long k)
 {
   // Optimisation : when k>n/2 we use the relation
   // sum_{j=0}^k binomial(n,j) =  2^n - sum_{j=0}^{n-k-1} binomial(n,j)
@@ -201,7 +196,7 @@ int64_t SumBinomialMod(long n, long k)
 
 
 /* return fractionnal part of 10^n*(a/b) */
-double DigitsOfFraction(long n, int64_t a, int64_t b)
+static double DigitsOfFraction(long n, int64_t a, int64_t b)
 {
   InitializeModulo(b);
   int64_t pow = PowMod(10, n);
@@ -212,7 +207,7 @@ double DigitsOfFraction(long n, int64_t a, int64_t b)
 
 /* return fractionnal part of 10^n*S, where S=4*sum_{k=0}^{m-1} (-1)^k/(2*k+1).
  * m is even */
-double DigitsOfSeries(long n, int64_t m)
+static double DigitsOfSeries(long n, int64_t m)
 {
   double x = 0.;
   for (int64_t k = 0; k < m; k += 2) {
@@ -230,10 +225,7 @@ double DigitsOfPi(long n)
   long N = 1 + (long)((n + 15.) * log(10.) / (1. + log(2. * M))); // n >= N
   N += N % 2; // N should be even
   int64_t mmax = (int64_t)M * (int64_t)N + (int64_t)N;
-  printf("Parameters : M=%ld, N=%ld, M*N+M=%.0lf\n", M, N, (double)mmax);
-  double st = MyTime();
   double x = DigitsOfSeries(n, mmax);
-  printf("Series time : %.2lf\n", MyTime() - st);
   for (long k = 0.; k < N; k++) {
     int64_t m = (int64_t)2 * (int64_t)M * (int64_t)N + (int64_t)2 * (int64_t)k + 1;
     InitializeModulo(m);
@@ -245,32 +237,4 @@ double DigitsOfPi(long n)
     x = x - floor(x);
   }
   return x;
-}
-
-
-int main()
-{
-  long n;
-  printf("Pidec, direct computation of decimal digits of pi at a given "
-         "position n.\n");
-  printf("(http://numbers.computation.free.fr/Constants/constants.html for "
-         "more details)\n");
-  printf("Enter n : ");
-  scanf("%ld", &n);
-  if (n < 50) {
-    printf("Error, n should be bigger than 50. Please retry\n");
-    exit(1);
-  }
-  double st = MyTime();
-  double x = DigitsOfPi(n);
-  double pow = 1.e9;
-  double y = x * pow;
-  // To be able to know exactly the digits of pi at position n, the
-  // value (pow*x) should be not too close to an integer
-  while (pow > 10 && (y - floor(y) < 0.05 || y - floor(y) > 0.95)) {
-    pow /= 10.;
-    y = x * pow;
-  }
-  printf("Digits of pi after n-th decimal digit : %.0lf\n", floor(y));
-  printf("Total time: %.2lf\n", MyTime() - st);
 }
