@@ -33,7 +33,7 @@ bool Printer::paper()
 
 void Printer::rotate(bool rotate)
 {
-  uint8_t cmd[] = { 0x1b, 0x56, rotate ? 0x01 : 0x00 };
+  uint8_t cmd[] = { 0x1b, 0x56, uint8_t(rotate ? 0x01 : 0x00) };
   _port.write(cmd, sizeof(cmd));
 }
 
@@ -47,7 +47,7 @@ void Printer::mode(uint8_t mode)
 
 void Printer::line_space(int dots)
 {
-  uint8_t cmd[] = { 0x1b, 0x33, dots };
+  uint8_t cmd[] = { 0x1b, 0x33, uint8_t(dots) };
   _port.write(cmd, sizeof(cmd));
 }
 
@@ -68,7 +68,7 @@ void Printer::flush(int dots)
 {
   // print and advance a number of pixels, but always advance at least
   // the height of what's in the print buffer
-  uint8_t cmd[] = { 0x1b, 0x4a, dots };
+  uint8_t cmd[] = { 0x1b, 0x4a, uint8_t(dots) };
   _port.write(cmd, sizeof(cmd));
 }
 
@@ -95,7 +95,7 @@ uint8_t Printer::status(int which)
 
   int b;
   uint32_t now_us;
-  uint8_t cmd[] = { 0x10, 0x04, which };
+  uint8_t cmd[] = { 0x10, 0x04, uint8_t(which) };
 
   _port.write(cmd, sizeof(cmd));
   uint32_t start_us = micros();
