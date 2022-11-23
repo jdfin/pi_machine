@@ -80,13 +80,15 @@ bool paper_ok()
     return true;
 #endif
 
-  led.set(4); // red
+  // "paper out" is winking red
+  led.pattern(Rgb::Red, 10, Rgb::Off, 990);
 
   // Time we started waiting for more paper. This is used to adjust the global
   // start_ms so it doesn't include paper out time.
   uint32_t wait_start_ms = millis();
 
-  const uint32_t wait_ms = 10000; // 10 seconds
+  // need to see paper for 10 seconds before continuing
+  const uint32_t wait_ms = 10000;
 
   // last time paper was detected as "out"
   uint32_t paper_out_ms = millis();
@@ -95,24 +97,29 @@ bool paper_ok()
 #if CHECK_PAPER_FAKE
     if (digitalRead(paper_fake_pin) != paper_fake_yes) {
       paper_out_ms = millis();
-      led.set(4); // red
+      // winking red means we don't see paper
+      led.pattern(Rgb::Red, 10, Rgb::Off, 990);
     } else {
-      led.set(1); // blue
+      // solid red means we see paper, waiting for 10 seconds
+      led.set(Rgb::Red);
     }
 #else
     if (!printer.paper()) {
       paper_out_ms = millis();
-      led.set(4); // red
+      // winking red means we don't see paper
+      led.pattern(Rgb::Red, 10, Rgb::Off, 990);
     } else {
-      led.set(1); // blue
+      // solid red means we see paper, waiting for 10 seconds
+      led.set(Rgb::Red);
     }
 #endif
+    led.loop();
   }
 
   // Adjust start_ms as if we didn't have to wait
   start_ms += (millis() - wait_start_ms);
 
-  led.set(2); // green
+  led.set(Rgb::Green);
 
   return false;
 
@@ -140,7 +147,8 @@ bool power_ok()
   if (v >= v_thresh)
     return true;
 
-  led.set(4); // red
+  // "5V power out" is winking blue
+  led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
 
   // Wait to be plugged in for at least 1 sec, then return false.
   // The delay is to let the printer boot up.
@@ -153,14 +161,21 @@ bool power_ok()
   uint32_t power_low_ms = millis();
 
   while ((millis() - power_low_ms) < wait_ms) {
-    if (analogRead(2) < v_thresh)
+    if (analogRead(2) < v_thresh) {
       power_low_ms = millis();
+      // winking blue means we don't see 5V power
+      led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
+    } else {
+      // solid blue means we see 5V power, waiting 1 second
+      led.set(Rgb::Blue);
+    }
+    led.loop();
   }
 
   // Adjust start_ms as if we didn't have to wait
   start_ms += (millis() - wait_start_ms);
 
-  led.set(2); // green
+  led.set(Rgb::Green);
 
   return false;
 
@@ -269,7 +284,7 @@ void setup()
 {
   led.begin();
 
-  led.set(1); // blue
+  led.set(Rgb::Blue);
 
   Serial.begin(115200);
 
@@ -279,7 +294,7 @@ void setup()
   delay(250);
 #endif
 
-  led.set(2); // green
+  led.set(Rgb::Green);
 
 #if CHECK_PAPER_FAKE
   // switch from gpio to ground
