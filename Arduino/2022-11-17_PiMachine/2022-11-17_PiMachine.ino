@@ -4,6 +4,7 @@
 #include <pidec.h>
 #include <rgb.h>
 #include <printer.h>
+#include <millis64.h>
 
 // if 1, wait for serial (usb) console before starting
 #define WAIT_CONSOLE 0
@@ -26,100 +27,129 @@ static const int paper_fake_yes = 1; // gpio when "paper is present"
 
 // Minimum number of milliseconds per digit printed.
 // 250 seems about right, or slower sometimes for debugging.
-const uint32_t print_interval_ms = 500; //250;
+static const uint32_t print_interval_ms = 500; //250;
 
 // 19200 for the Mini, 9600 for the Nano
-const int printer_baud = 19200;
+static const int printer_baud = 19200;
 
-Printer printer(Serial1);
+static Printer printer(Serial1);
 
 static const int red_pin = 5;
 static const int green_pin = 6;
 static const int blue_pin = 9;
-Rgb led(red_pin, green_pin, blue_pin);
+static Rgb led(red_pin, green_pin, blue_pin);
 
 
-void ms_to_hms(uint32_t ms, int& h, int& m, int& s)
+// after a couple of months, ms64 will not fit in 32 bits
+static void ms_to_hms(uint64_t ms64, uint32_t& h, uint32_t& m, uint32_t& s)
 {
-  s = ms / 1000;
-
+  // After running continuously for 136 years, s will not fit in 32 bits.
+  s = ms64 / 1000;
   m = s / 60;
   s = s - (m * 60);
-
   h = m / 60;
   m = m - (h * 60);
 }
 
-
-uint32_t start_ms;
+// The start time is advanced when waiting for power or paper. Making it
+// 64 bits allows us to sit for two months with no paper and still work.
+// Why not.
+static uint64_t start_ms64;
 
 // In the program, first digit after the decimal (the 1) is digit zero
 // (that is dictated by DigitsOfPi).
+//
 // In the printout, the initial '3' is digit zero, so the printout uses
 // digit_num + 1.
-int32_t digit_num = 0;
+//
+// digit_num: -4 and -3 are spaces, -2 is the '3', -1 is the '.', then
+//            0.. are the digits after the decimal point
+static const int32_t digit_num_start = -4;
+static int32_t digit_num = digit_num_start;
 
 
 // How long it took to calculate the most recent digit
-uint32_t digit_ms = 0;
+// 32 bits here means a digit must take less than ~49 days
+static uint32_t digit_ms = 0;
+
+
+// return true if the printer claims to have paper, false otherwise
+static bool check_paper()
+{
+#if CHECK_PAPER_FAKE
+  return (digitalRead(paper_fake_pin) == paper_fake_yes);
+#else
+  return printer.paper();
+#endif
+}
 
 
 // If paper is detected, return true immediately.
 // If paper is not detected, wait for it to be detected continuously
 // for 10 seconds, then return false.
-bool paper_ok()
+// Logic is similar to power_wait, but in here we also allow for power
+// disappearing (i.e. run out of paper, unplug it to move it or something).
+static bool paper_wait()
 {
 
 #if CHECK_PAPER || CHECK_PAPER_FAKE
 
-#if CHECK_PAPER_FAKE
-  if (digitalRead(paper_fake_pin) == paper_fake_yes)
+  if (check_paper())
     return true;
-#else
-  if (printer.paper())
-    return true;
-#endif
 
-  // "paper out" is winking red
-  led.pattern(Rgb::Red, 10, Rgb::Off, 990);
+  Serial.println("paper out");
 
   // Time we started waiting for more paper. This is used to adjust the global
-  // start_ms so it doesn't include paper out time.
-  uint32_t wait_start_ms = millis();
+  // start_ms64 so it doesn't include paper-out time. Allow for the total wait
+  // time to exceed 32 bits of milliseconds, i.e. two months, and still work.
+  uint64_t wait_start_ms64 = millis64();
 
-  // need to see paper for 10 seconds before continuing
+  // Need to see paper for 10 seconds before continuing.
   const uint32_t wait_ms = 10000;
 
-  // last time paper was detected as "out"
+  // Last time paper was detected as "out".
   uint32_t paper_out_ms = millis();
 
-  while ((millis() - paper_out_ms) < wait_ms) {
-#if CHECK_PAPER_FAKE
-    if (digitalRead(paper_fake_pin) != paper_fake_yes) {
+  while ((millis() - paper_out_ms) < wait_ms) { // 32-bit-wrap safe
+
+    if (!power_wait()) {
+      // power went away, then came back
       paper_out_ms = millis();
-      // winking red means we don't see paper
-      led.pattern(Rgb::Red, 10, Rgb::Off, 990);
-    } else {
+    }
+
+    if (check_paper()) {
       // solid red means we see paper, waiting for 10 seconds
       led.set(Rgb::Red);
-    }
-#else
-    if (!printer.paper()) {
-      paper_out_ms = millis();
+    } else {
       // winking red means we don't see paper
       led.pattern(Rgb::Red, 10, Rgb::Off, 990);
-    } else {
-      // solid red means we see paper, waiting for 10 seconds
-      led.set(Rgb::Red);
+      paper_out_ms = millis();
     }
-#endif
-    led.loop();
-  }
 
-  // Adjust start_ms as if we didn't have to wait
-  start_ms += (millis() - wait_start_ms);
+    led.loop(); // handle blinking
 
-  led.set(Rgb::Green);
+    yield(); // could be in this while loop for a long time
+
+  } // while
+
+  // Adjust start_ms64 as if we didn't have to wait. Allow for paper having
+  // been out for months.
+  start_ms64 += (millis64() - wait_start_ms64);
+  // start_ms64 can go "negative" near startup if we have both paper and
+  // power out, causing ugly output. The msb check and zeroing fixes that.
+  if (int64_t(start_ms64) < 0) // check msb
+    start_ms64 = 0;
+
+  // Back up 30 digits after paper out. A nice clean end-of-paper only needs
+  // a few digits of backing up (4 or 5 might do), but sometimes the end of
+  // the roll is folded back on itself and a couple of inches at the end
+  // don't print because it's trying to print on the back of the paper.
+  // We're printing about 8.5 lines per inch.
+  digit_num -= 30;
+  if (digit_num < digit_num_start)
+    digit_num = digit_num_start;
+
+  Serial.println("paper okay");
 
   return false;
 
@@ -129,12 +159,16 @@ bool paper_ok()
 
 #endif // CHECK_PAPER(_FAKE)
 
-} // check_paper
+} // paper_wait
 
 
-bool power_ok()
+// return true if 5V supply is present, false otherwise
+static bool check_power()
 {
-  // VUSB is 5.0V when plugged in, and is about 3.3V when not plugged in
+
+#if CHECK_POWER
+
+  // VUSB is 5.0V when plugged in, and is about 3.3V when not plugged in.
   // The pin is half that. Set threshold for halfway between 5.0 and 3.3.
   // Halfway between 3.3 and 5.0 is 4.15V.
   // Pin is half that, or 2.075V.
@@ -142,42 +176,7 @@ bool power_ok()
   const int v_thresh = 644;
   int v = analogRead(2);
 
-#if CHECK_POWER
-
-  if (v >= v_thresh)
-    return true;
-
-  // "5V power out" is winking blue
-  led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
-
-  // Wait to be plugged in for at least 1 sec, then return false.
-  // The delay is to let the printer boot up.
-
-  uint32_t wait_start_ms = millis();
-
-  const uint32_t wait_ms = 1000; // 1 second
-
-  // last time power was seen low
-  uint32_t power_low_ms = millis();
-
-  while ((millis() - power_low_ms) < wait_ms) {
-    if (analogRead(2) < v_thresh) {
-      power_low_ms = millis();
-      // winking blue means we don't see 5V power
-      led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
-    } else {
-      // solid blue means we see 5V power, waiting 1 second
-      led.set(Rgb::Blue);
-    }
-    led.loop();
-  }
-
-  // Adjust start_ms as if we didn't have to wait
-  start_ms += (millis() - wait_start_ms);
-
-  led.set(Rgb::Green);
-
-  return false;
+  return (v >= v_thresh);
 
 #else // CHECK_POWER
 
@@ -188,22 +187,79 @@ bool power_ok()
 } // check_power
 
 
+static bool power_wait()
+{
+
+  if (check_power())
+    return true;
+
+  Serial.println("power out");
+
+  // Wait to be plugged in for at least 1 sec, then return false.
+  // The delay is to let the printer boot up.
+  // Returning false prevents the just-calculated digit from being printed.
+
+  uint64_t wait_start_ms64 = millis64();
+
+  const uint32_t wait_ms = 1000; // 1 second
+
+  // last time power was seen low
+  uint32_t power_low_ms = millis();
+
+  while ((millis() - power_low_ms) < wait_ms) { // 32-bit-wrap safe
+
+    if (check_power()) {
+      // solid blue means we see 5V power, waiting 1 second
+      led.set(Rgb::Blue);
+    } else {
+      // winking blue means we don't see 5V power
+      led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
+      power_low_ms = millis();
+    }
+
+    led.loop(); // handle blinking
+
+    yield(); // could be in this while loop for hours
+
+  } // while
+
+  // Adjust start_ms64 as if we didn't have to wait. I don't think power
+  // can be out for months (32-bit overflow), but do it just like paper out
+  // (where being out for months is plausible).
+  start_ms64 += (millis64() - wait_start_ms64);
+  if (int64_t(start_ms64) < 0) // check msb
+    start_ms64 = 0;
+
+  // Back up three digits after power outage; really only the previous one
+  // might be chopped off, but maybe there's some other case where more than
+  // one might be lost, and losing a digit would be most terrible.
+  digit_num -= 3;
+  if (digit_num < digit_num_start)
+    digit_num = digit_num_start;
+
+  Serial.println("power okay");
+
+  return false;
+
+} // power_wait
+
+
 // print a digit (paper and power already checked)
 // 
-void print_digit(char digit)
+static void print_digit(char digit)
 {
   // Limit print rate so we don't queue up lines in the receive buffer,
   // which breaks paper-out handling. This is different from worrying
   // about overrunning the receive buffer; we basically want to know a
   // digit is on the paper before we try to print another one.
-  static uint32_t next_print_ms = 0;
-  while (millis() < next_print_ms)
+  static uint64_t last_print_ms64 = 0;
+  while ((millis64() - last_print_ms64) < print_interval_ms)
     delay(1);
-  next_print_ms = millis() + print_interval_ms;
+  last_print_ms64 = millis64();
 
   // timestamp that will print with digit
-  int h, m, s;
-  ms_to_hms(millis() - start_ms, h, m, s);
+  uint32_t h, m, s;
+  ms_to_hms(last_print_ms64 - start_ms64, h, m, s);
 
   // digit number to print
   int32_t pr_digit_num;
@@ -230,12 +286,12 @@ void print_digit(char digit)
 
   // only print number and timestamp if digit is 0..9
   if ('0' <= digit && digit <= '9')
-    sprintf(buf, "%-12ld| %c |%6d:%02d:%02d", pr_digit_num, digit, h, m, s);
+    sprintf(buf, "%-12ld| %c |%6lu:%02lu:%02lu", pr_digit_num, digit, h, m, s);
   else
     sprintf(buf, "            | %c |            ", digit);
   Serial.print(buf);
 
-  sprintf(buf, "%9d", digit_ms);
+  sprintf(buf, "%9lu", digit_ms);
   Serial.print(buf);
 
   Serial.println();
@@ -260,13 +316,14 @@ void print_digit(char digit)
                Printer::Modes::Height2x | Printer::Modes::Width2x);
   printer.print(digit);
 
-  // timestamp
+  // Timestamp. This will run up against the digit in 11 years, then
+  // do something uglier in 114 years.
   printer.rotate(false);
   printer.mode(Printer::Modes::FontLarge);
   printer.print(' ');
   printer.print(0xb2); // gray box
   if ('0' <= digit && digit <= '9') {
-    sprintf(buf, "%6d:%02d:%02d", h, m, s); // 12 chars right-justified
+    sprintf(buf, "%6lu:%02lu:%02lu", h, m, s); // 12 chars right-justified
     printer.print(buf);
   }
 
@@ -284,7 +341,7 @@ void setup()
 {
   led.begin();
 
-  led.set(Rgb::Blue);
+  led.set(Rgb::White);
 
   Serial.begin(115200);
 
@@ -294,12 +351,12 @@ void setup()
   delay(250);
 #endif
 
-  led.set(Rgb::Green);
-
 #if CHECK_PAPER_FAKE
+
   // switch from gpio to ground
   // open is paper-yes, closed is paper-no
   pinMode(paper_fake_pin, INPUT_PULLUP);
+
 #endif
 
   // printer.begin() sets the baud rate and sends a reset command,
@@ -307,9 +364,9 @@ void setup()
   printer.begin(printer_baud);
   delay(250);
 
-  start_ms = millis();
+  start_ms64 = millis64();
 
-  digit_num = -4;
+  digit_num = digit_num_start;
 
 } // setup
 
@@ -318,12 +375,14 @@ void setup()
 // the decimal (I don't know why) so before that we cheat and look it up
 // This also puts a couple of blank lines at the start, and prints the
 // decimal point.
-const char *pi50 =
+static const char *pi50 =
     "  3.1415926535897932384626433832795028841971693993751058209";
 
 
 void loop()
 {
+  led.set(Rgb::Green);
+
   uint32_t digit_start_ms = millis();
 
   char digit_char;
@@ -345,14 +404,25 @@ void loop()
 
   }
 
+  // how long it took to calculate this digit (only used for serial prints)
   digit_ms = millis() - digit_start_ms;
 
-  if (paper_ok() && power_ok()) {
-    print_digit(digit_char);
-    digit_num++;
-  } else {
-    digit_num -= 3; // repeat two digits
-    if (digit_num < -4)
-      digit_num = -4;
-  }
-}
+  // If power_wait() returns false, power was detected as gone, then we
+  // waited for it to come back. The last line printed might be faint or
+  // chopped off, so digit_num has been backed up and we need to go back
+  // and recalculate a previous digit.
+
+  if (!power_wait())
+    return;
+
+  // Similar to power_wait(); start over on a previous digit. This backs up
+  // farther than power_wait since the end of the paper can cause loss of more
+  // digits.
+
+  if (!paper_wait())
+    return;
+
+  print_digit(digit_char);
+  digit_num++;
+
+} // loop

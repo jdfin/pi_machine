@@ -53,7 +53,9 @@ class Rgb {
 
     void pattern(int rgb1, int ms1, int rgb2, int ms2)
     {
-      if (rgb1 == _rgb1 && ms1 == _ms1 && rgb2 == _rgb2 && ms2 == _ms2)
+      if (rgb1 == _rgb1 && ms1 == _ms1 &&
+          rgb2 == _rgb2 && ms2 == _ms2 &&
+          _pat_num != 0)
         return;
 
       _rgb1 = rgb1;

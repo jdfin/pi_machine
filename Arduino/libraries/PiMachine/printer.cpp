@@ -27,6 +27,9 @@ void Printer::reset()
 
 bool Printer::paper()
 {
+  // XXX: Should check for no-response condition, either by
+  //      changing status() to return error, or checking fixed
+  //      bits in returned status byte.
   return (status(4) & 0x40) == 0; // bit 0x40 set means paper out
 }
 
@@ -78,6 +81,9 @@ void Printer::flush(int dots)
 // Mini Thermal Printer:
 //   First time after reset has been observed to take up to 18.7 msec
 //   (usually 13.5 msec). After that, it's about 8.3 msec.
+//   Update: with a 30 msec timeout, sometimes it still times out; have
+//   not verified that the response came back after 30 msec, but a 100
+//   msec timeout works better.
 //
 // Nano Thermal Printer:
 //   First time after reset has been observed to take up to 8.2 msec
@@ -87,7 +93,7 @@ void Printer::flush(int dots)
 //
 uint8_t Printer::status(int which)
 {
-  const uint32_t timeout_us = 30000; // 30 msec
+  const uint32_t timeout_us = 100000; // 100 msec
 
   // read and discard any old data (usually none)
   while (_port.read() != -1)
