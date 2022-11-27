@@ -1,10 +1,12 @@
+// PiMachine
+
 #include <Arduino.h>
 #include <string.h>
 #include <stdio.h>
 #include <pidec.h>
 #include <rgb.h>
 #include <printer.h>
-#include <millis64.h>
+#include <chrono.h>
 
 // if 1, wait for serial (usb) console before starting
 #define WAIT_CONSOLE 0
@@ -26,8 +28,8 @@ static const int paper_fake_yes = 1; // gpio when "paper is present"
 #define CHECK_POWER 1
 
 // Minimum number of milliseconds per digit printed.
-// 250 seems about right, or slower sometimes for debugging.
-static const uint32_t print_interval_ms = 500; //250;
+// 250 seems to be about the fastest, slower for debugging.
+static const Interval print_interval(500);
 
 // 19200 for the Mini, 9600 for the Nano
 static const int printer_baud = 19200;
@@ -40,21 +42,8 @@ static const int blue_pin = 9;
 static Rgb led(red_pin, green_pin, blue_pin);
 
 
-// after a couple of months, ms64 will not fit in 32 bits
-static void ms_to_hms(uint64_t ms64, uint32_t& h, uint32_t& m, uint32_t& s)
-{
-  // After running continuously for 136 years, s will not fit in 32 bits.
-  s = ms64 / 1000;
-  m = s / 60;
-  s = s - (m * 60);
-  h = m / 60;
-  m = m - (h * 60);
-}
-
-// The start time is advanced when waiting for power or paper. Making it
-// 64 bits allows us to sit for two months with no paper and still work.
-// Why not.
-static uint64_t start_ms64;
+// The start time is advanced when waiting for power or paper.
+static Time start_time;
 
 // In the program, first digit after the decimal (the 1) is digit zero
 // (that is dictated by DigitsOfPi).
@@ -68,9 +57,9 @@ static const int32_t digit_num_start = -4;
 static int32_t digit_num = digit_num_start;
 
 
-// How long it took to calculate the most recent digit
-// 32 bits here means a digit must take less than ~49 days
-static uint32_t digit_ms = 0;
+// How long it took to calculate the most recent digit.
+// loop() sets this and print_digit() uses it.
+static Interval digit_interval;
 
 
 // return true if the printer claims to have paper, false otherwise
@@ -100,21 +89,20 @@ static bool paper_wait()
   Serial.println("paper out");
 
   // Time we started waiting for more paper. This is used to adjust the global
-  // start_ms64 so it doesn't include paper-out time. Allow for the total wait
-  // time to exceed 32 bits of milliseconds, i.e. two months, and still work.
-  uint64_t wait_start_ms64 = millis64();
+  // start_time so it doesn't include paper-out time.
+  const Time wait_start;
 
   // Need to see paper for 10 seconds before continuing.
-  const uint32_t wait_ms = 10000;
+  const Interval wait_timeout(10000);
 
   // Last time paper was detected as "out".
-  uint32_t paper_out_ms = millis();
+  Time paper_out;
 
-  while ((millis() - paper_out_ms) < wait_ms) { // 32-bit-wrap safe
+  while ((Time::now() - paper_out) < wait_timeout) {
 
     if (!power_wait()) {
       // power went away, then came back
-      paper_out_ms = millis();
+      paper_out = Time::now();
     }
 
     if (check_paper()) {
@@ -123,7 +111,7 @@ static bool paper_wait()
     } else {
       // winking red means we don't see paper
       led.pattern(Rgb::Red, 10, Rgb::Off, 990);
-      paper_out_ms = millis();
+      paper_out = Time::now();
     }
 
     led.loop(); // handle blinking
@@ -132,13 +120,8 @@ static bool paper_wait()
 
   } // while
 
-  // Adjust start_ms64 as if we didn't have to wait. Allow for paper having
-  // been out for months.
-  start_ms64 += (millis64() - wait_start_ms64);
-  // start_ms64 can go "negative" near startup if we have both paper and
-  // power out, causing ugly output. The msb check and zeroing fixes that.
-  if (int64_t(start_ms64) < 0) // check msb
-    start_ms64 = 0;
+  // Adjust start_time as if we didn't have to wait.
+  start_time += (Time::now() - wait_start);
 
   // Back up 30 digits after paper out. A nice clean end-of-paper only needs
   // a few digits of backing up (4 or 5 might do), but sometimes the end of
@@ -199,14 +182,14 @@ static bool power_wait()
   // The delay is to let the printer boot up.
   // Returning false prevents the just-calculated digit from being printed.
 
-  uint64_t wait_start_ms64 = millis64();
+  const Time wait_start;
 
-  const uint32_t wait_ms = 1000; // 1 second
+  const Interval wait_timeout(1000); // 1 second
 
   // last time power was seen low
-  uint32_t power_low_ms = millis();
+  Time power_low;
 
-  while ((millis() - power_low_ms) < wait_ms) { // 32-bit-wrap safe
+  while ((Time::now() - power_low) < wait_timeout) {
 
     if (check_power()) {
       // solid blue means we see 5V power, waiting 1 second
@@ -214,7 +197,7 @@ static bool power_wait()
     } else {
       // winking blue means we don't see 5V power
       led.pattern(Rgb::Blue, 10, Rgb::Off, 990);
-      power_low_ms = millis();
+      power_low = Time::now();
     }
 
     led.loop(); // handle blinking
@@ -223,12 +206,8 @@ static bool power_wait()
 
   } // while
 
-  // Adjust start_ms64 as if we didn't have to wait. I don't think power
-  // can be out for months (32-bit overflow), but do it just like paper out
-  // (where being out for months is plausible).
-  start_ms64 += (millis64() - wait_start_ms64);
-  if (int64_t(start_ms64) < 0) // check msb
-    start_ms64 = 0;
+  // Adjust start_time as if we didn't have to wait.
+  start_time += (Time::now() - wait_start);
 
   // Back up three digits after power outage; really only the previous one
   // might be chopped off, but maybe there's some other case where more than
@@ -252,14 +231,14 @@ static void print_digit(char digit)
   // which breaks paper-out handling. This is different from worrying
   // about overrunning the receive buffer; we basically want to know a
   // digit is on the paper before we try to print another one.
-  static uint64_t last_print_ms64 = 0;
-  while ((millis64() - last_print_ms64) < print_interval_ms)
+  static Time last_print_time;
+  while ((Time::now() - last_print_time) < print_interval)
     delay(1);
-  last_print_ms64 = millis64();
+  last_print_time = Time::now();
 
   // timestamp that will print with digit
-  uint32_t h, m, s;
-  ms_to_hms(last_print_ms64 - start_ms64, h, m, s);
+  uint32_t h, m, s, ms;
+  (last_print_time - start_time).hmsm(h, m, s, ms);
 
   // digit number to print
   int32_t pr_digit_num;
@@ -291,7 +270,7 @@ static void print_digit(char digit)
     sprintf(buf, "            | %c |            ", digit);
   Serial.print(buf);
 
-  sprintf(buf, "%9lu", digit_ms);
+  sprintf(buf, "%9lld", digit_interval.ms());
   Serial.print(buf);
 
   Serial.println();
@@ -364,7 +343,7 @@ void setup()
   printer.begin(printer_baud);
   delay(250);
 
-  start_ms64 = millis64();
+  start_time = Time::now();
 
   digit_num = digit_num_start;
 
@@ -383,7 +362,7 @@ void loop()
 {
   led.set(Rgb::Green);
 
-  uint32_t digit_start_ms = millis();
+  Time digit_start_time;
 
   char digit_char;
 
@@ -405,7 +384,7 @@ void loop()
   }
 
   // how long it took to calculate this digit (only used for serial prints)
-  digit_ms = millis() - digit_start_ms;
+  Interval digit_interval(digit_start_time - Time::now());
 
   // If power_wait() returns false, power was detected as gone, then we
   // waited for it to come back. The last line printed might be faint or
