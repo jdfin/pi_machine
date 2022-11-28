@@ -1,0 +1,11 @@
+data/
+downloads/
+Arduino/ac-beetle.bat
+Arduino/ac-feather_m4.bat
+Arduino/ac-qtpy_m0.bat
+Arduino/ac-teensy.bat
+Arduino/ac-xiao.bat
+Arduino/arduino-cli.exe
+Arduino/arduino-cli*.zip
+Arduino/blink/
+Arduino/config.yaml
