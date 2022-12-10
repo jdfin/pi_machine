@@ -29,7 +29,11 @@ static const int paper_fake_yes = 1; // gpio when "paper is present"
 
 // Minimum number of milliseconds per digit printed.
 // 250 seems to be about the fastest, slower for debugging.
+#if PRINT_DIGITS
 static const Interval print_interval(500);
+#else
+static const Interval print_interval(0);
+#endif
 
 // 19200 for the Mini, 9600 for the Nano
 static const int printer_baud = 19200;
@@ -62,6 +66,8 @@ static int32_t digit_num = digit_num_start;
 static Interval digit_interval;
 
 
+#if CHECK_PAPER || CHECK_PAPER_FAKE
+
 // return true if the printer claims to have paper, false otherwise
 static bool check_paper()
 {
@@ -71,6 +77,8 @@ static bool check_paper()
   return printer.paper();
 #endif
 }
+
+#endif // CHECK_PAPER || CHECK_PAPER_FAKE
 
 
 // If paper is detected, return true immediately.
@@ -384,7 +392,7 @@ void loop()
   }
 
   // how long it took to calculate this digit (only used for serial prints)
-  Interval digit_interval(digit_start_time - Time::now());
+  digit_interval = Time::now() - digit_start_time;
 
   // If power_wait() returns false, power was detected as gone, then we
   // waited for it to come back. The last line printed might be faint or
