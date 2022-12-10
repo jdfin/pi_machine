@@ -100,7 +100,6 @@ uint8_t Printer::status(int which)
     ;
 
   int b;
-  uint32_t now_us;
   uint8_t cmd[] = { 0x10, 0x04, uint8_t(which) };
 
   _port.write(cmd, sizeof(cmd));
@@ -115,4 +114,11 @@ uint8_t Printer::status(int which)
     return 0; // no response
 
   return uint8_t(b);
+}
+
+
+void Printer::heat(uint8_t n1, uint8_t n2, uint8_t n3)
+{
+  uint8_t cmd[] = { 0x1b, 0x37, n1, n2, n3 };
+  _port.write(cmd, sizeof(cmd));
 }

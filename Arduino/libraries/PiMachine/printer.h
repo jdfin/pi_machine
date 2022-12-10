@@ -38,6 +38,8 @@ class Printer {
 
     uint8_t status(int which);
 
+    void heat(uint8_t n1, uint8_t n2, uint8_t n3);
+
     // informational
     uint32_t response_us;
 
